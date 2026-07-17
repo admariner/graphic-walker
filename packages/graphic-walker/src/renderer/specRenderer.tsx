@@ -1,7 +1,7 @@
 import { Resizable } from 're-resizable';
 import React, { forwardRef, useMemo, useContext } from 'react';
 
-import PivotTable from '../components/pivotTable';
+import { PivotTableCore } from '../components/pivotTable';
 import LeafletRenderer, { LEAFLET_DEFAULT_HEIGHT, LEAFLET_DEFAULT_WIDTH } from '../components/leafletRenderer';
 import ReactVega, { IReactVegaHandler } from '../vis/react-vega';
 import { DraggableFieldState, IRow, IThemeKey, IVisualConfigNew, IVisualLayout, VegaGlobalConfig, IChannelScales } from '../interfaces';
@@ -10,6 +10,8 @@ import { GWGlobalConfig } from '../vis/theme';
 import { uiThemeContext, themeContext } from '@/store/theme';
 import { parseColorToHex } from '@/utils/colors';
 import ObservablePlotRenderer from '@/vis/observable-plot-renderer';
+import { useCompututaion } from '@/store';
+import { useAppRootContext } from '@/components/appRoot';
 
 interface SpecRendererProps {
     name?: string;
@@ -53,6 +55,10 @@ const SpecRenderer = forwardRef<IReactVegaHandler, SpecRendererProps>(function (
 
     const rows = draggableFieldState.rows;
     const columns = draggableFieldState.columns;
+    const pivotFields = useMemo(
+        () => [...draggableFieldState.dimensions, ...draggableFieldState.measures],
+        [draggableFieldState.dimensions, draggableFieldState.measures]
+    );
     const color = draggableFieldState.color;
     const opacity = draggableFieldState.opacity;
     const shape = draggableFieldState.shape;
@@ -64,6 +70,8 @@ const SpecRenderer = forwardRef<IReactVegaHandler, SpecRendererProps>(function (
     const format = _format;
 
     const isPivotTable = geoms[0] === 'table';
+    const computation = useCompututaion();
+    const appRootRef = useAppRootContext();
 
     const enableResize = size.mode === 'fixed' && Boolean(onChartResize);
     const mediaTheme = useContext(themeContext);
@@ -111,13 +119,22 @@ const SpecRenderer = forwardRef<IReactVegaHandler, SpecRendererProps>(function (
 
     if (isPivotTable) {
         return (
-            <PivotTable
-                data={data}
-                draggableFieldState={draggableFieldState}
-                visualConfig={visualConfig}
-                layout={layout}
-                vizThemeConfig={vizThemeConfig}
+            <PivotTableCore
+                computation={computation}
+                viewData={data}
+                fields={pivotFields}
+                rows={rows}
+                columns={columns}
+                filters={draggableFieldState.filters}
+                defaultAggregated={defaultAggregated}
+                folds={visualConfig.folds}
+                limit={visualConfig.limit}
+                timezoneDisplayOffset={timezoneDisplayOffset}
+                showTableSummary={layout.showTableSummary}
+                numberFormat={layout.format.numberFormat}
                 disableCollapse={disableCollapse}
+                onRenderStatusChange={(status) => appRootRef.current?.updateRenderStatus(status)}
+                onError={(error) => console.error(error)}
             />
         );
     }

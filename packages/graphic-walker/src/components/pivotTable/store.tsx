@@ -1,5 +1,5 @@
 import { makeAutoObservable, observable } from 'mobx';
-import { INestNode } from './inteface';
+import { INestNode } from './interface';
 import { IField, IRow } from '../../interfaces';
 import React, { createContext, useContext, useEffect } from 'react';
 

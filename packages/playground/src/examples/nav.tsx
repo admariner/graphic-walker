@@ -8,6 +8,10 @@ export const pages = [
         name: 'PureRenderer',
     },
     {
+        comp: () => import('./pages/pivotTable'),
+        name: 'PivotTable',
+    },
+    {
         comp: () => import('./pages/inModal'),
         name: 'Graphic Walker In a Modal',
     },

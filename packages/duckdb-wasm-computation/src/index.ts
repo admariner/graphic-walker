@@ -1,4 +1,4 @@
-let inited = false;
+let initPromise: Promise<void> | undefined;
 
 import * as duckdb from '@duckdb/duckdb-wasm';
 import duckdb_wasm from '@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url';
@@ -8,10 +8,9 @@ import eh_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url'
 import initWasm, { parser_dsl_with_table } from '@kanaries/gw-dsl-parser';
 import dslWasm from '@kanaries/gw-dsl-parser/gw_dsl_parser_bg.wasm?url';
 import { nanoid } from 'nanoid';
-import type { IDataSourceProvider, IMutField, IDataSourceListener } from '@kanaries/graphic-walker';
-import { exportFullRaw, fromFields } from '@kanaries/graphic-walker/models/visSpecHistory';
-import { Table, Vector } from 'apache-arrow';
-import { bigNumToString } from 'apache-arrow/util/bn';
+import { exportFullRaw, fromFields, type IDataSourceProvider, type IMutField, type IDataSourceListener, type IRow } from '@kanaries/graphic-walker';
+import { arrowValueToJSON } from './arrow';
+import { initializeResourceWithCleanup } from './lifecycle';
 
 const MANUAL_BUNDLES: duckdb.DuckDBBundles = {
     mvp: {
@@ -26,43 +25,42 @@ const MANUAL_BUNDLES: duckdb.DuckDBBundles = {
 
 let db: duckdb.AsyncDuckDB;
 
-export async function init() {
-    if (inited) return;
-    inited = true;
+async function initialize() {
     // Select a bundle based on browser checks
     const bundle = await duckdb.selectBundle(MANUAL_BUNDLES);
 
-    const worker_url = URL.createObjectURL(
+    const logger = new duckdb.ConsoleLogger();
+    const workerUrl = URL.createObjectURL(
         new Blob([`importScripts("${bundle.mainWorker!}");`], {
             type: 'text/javascript',
         })
     );
 
-    // Instantiate the asynchronus version of DuckDB-Wasm
-    const worker = new Worker(worker_url);
-    const logger = new duckdb.ConsoleLogger();
-    db = new duckdb.AsyncDuckDB(logger, worker);
-    await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-    URL.revokeObjectURL(worker_url);
-    await initWasm(dslWasm);
+    const candidate = await initializeResourceWithCleanup({
+        objectUrl: workerUrl,
+        createWorker: () => new Worker(workerUrl),
+        createResource: (worker) => new duckdb.AsyncDuckDB(logger, worker),
+        initialize: async (resource) => {
+            await resource.instantiate(bundle.mainModule, bundle.pthreadWorker);
+            await initWasm(dslWasm);
+        },
+        revokeObjectUrl: (url) => URL.revokeObjectURL(url),
+    });
+    db = candidate;
 }
 
-const ArrowToJSON = (v: any): any => {
-    if (typeof v === 'object') {
-        if (v instanceof Vector) {
-            return Array.from(v).map(ArrowToJSON);
-        } else {
-            return parseInt(bigNumToString(v as any));
-        }
+export function init(): Promise<void> {
+    if (!initPromise) {
+        initPromise = initialize().catch((error) => {
+            initPromise = undefined;
+            throw error;
+        });
     }
-    if (typeof v === 'bigint') {
-        return Number(v);
-    }
-    return v;
-};
+    return initPromise;
+}
 
-const transformData = (table: Table) => {
-    return table.toArray().map((r) => Object.fromEntries(Object.entries(r.toJSON()).map(([k, v]) => [k, ArrowToJSON(v)])));
+const transformData = (table: { toArray(): Array<{ toJSON(): Record<string, unknown> }> }) => {
+    return table.toArray().map((r) => Object.fromEntries(Object.entries(r.toJSON()).map(([k, v]) => [k, arrowValueToJSON(v)])));
 };
 
 export async function getMemoryProvider(): Promise<IDataSourceProvider> {
@@ -126,7 +124,7 @@ export async function getMemoryProvider(): Promise<IDataSourceProvider> {
     };
 }
 
-export async function getComputation(data: Record<string, number>[]) {
+export async function getComputation(data: IRow[]) {
     if (data.length === 0) {
         return {
             close: async () => {},

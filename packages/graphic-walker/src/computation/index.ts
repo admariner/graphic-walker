@@ -11,7 +11,6 @@ import type {
     IRow,
     ISortWorkflowStep,
     ITransformWorkflowStep,
-    IViewWorkflowStep,
     IVisFilter,
 } from '../interfaces';
 import { getTimeFormat } from '../lib/inferMeta';
@@ -20,6 +19,8 @@ import { processExpression } from '../utils/workflow';
 import { binarySearchClosest, isNotEmpty, parseKeyword } from '../utils';
 import { COUNT_FIELD_ID } from '../constants';
 import { range } from 'lodash-es';
+
+export { dataQuery } from './dataQuery';
 
 export const datasetStats = async (service: IComputationFunction): Promise<IDatasetStats> => {
     const res = (await service({
@@ -87,18 +88,6 @@ export const dataReadRaw = async (
         ],
         limit: pageSize,
         offset: pageOffset * pageSize,
-    });
-    return res;
-};
-
-export const dataQuery = async (service: IComputationFunction, workflow: IDataQueryWorkflowStep[], limit?: number): Promise<IRow[]> => {
-    const viewWorkflow = workflow.find((x) => x.type === 'view') as IViewWorkflowStep | undefined;
-    if (viewWorkflow && viewWorkflow.query.length === 1 && viewWorkflow.query[0].op === 'raw' && viewWorkflow.query[0].fields.length === 0) {
-        return [];
-    }
-    const res = await service({
-        workflow,
-        limit,
     });
     return res;
 };

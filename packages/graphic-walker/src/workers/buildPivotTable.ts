@@ -1,13 +1,40 @@
-import { INestNode } from '../components/pivotTable/inteface';
-import { buildMetricTableFromNestTree, buildNestTree } from '../components/pivotTable/utils';
+import { INestNode } from '../components/pivotTable/interface';
+import { buildMetricTableFromNestTree, buildNestTree, createPivotPathKey, pivotTableValuesEqual } from '../components/pivotTable/utils';
 import { IViewField, IRow } from '../interfaces';
 
-const getFirsts = (item: INestNode): INestNode[] => {
-    if (item.children.length > 0) {
-        return [item, ...getFirsts(item.children[0])];
+const getFirstVisibleValuePath = (item: INestNode): INestNode[] => {
+    const child = item.children.find((node) => node.kind === 'value');
+    if (child) {
+        return child.isCollapsed ? [child] : [child, ...getFirstVisibleValuePath(child)];
     }
-    return [item];
+    return [];
 };
+
+function getVisibleSlice(
+    data: IRow[],
+    visiblePrimaryData: IRow[],
+    primaryDimensions: IViewField[],
+    oppositeDimensions: IViewField[],
+    oppositePath: INestNode[]
+): IRow[] {
+    const visibleDimensions = oppositeDimensions.slice(0, oppositePath.length);
+    const hiddenDimensions = oppositeDimensions.slice(oppositePath.length);
+    const visiblePrimaryKeys = new Set(
+        visiblePrimaryData
+            .filter((row) => primaryDimensions.every((field) => Object.prototype.hasOwnProperty.call(row, field.fid)))
+            .map((row) => createPivotPathKey(primaryDimensions.map((field) => ({ key: field.fid, value: row[field.fid] }))))
+    );
+    return data.filter(
+        (row) =>
+            primaryDimensions.every((field) => Object.prototype.hasOwnProperty.call(row, field.fid)) &&
+            visiblePrimaryKeys.has(createPivotPathKey(primaryDimensions.map((field) => ({ key: field.fid, value: row[field.fid] })))) &&
+            visibleDimensions.every(
+                (field, index) =>
+                    Object.prototype.hasOwnProperty.call(row, field.fid) && pivotTableValuesEqual(row[field.fid], oppositePath[index].value)
+            ) &&
+            hiddenDimensions.every((field) => !Object.prototype.hasOwnProperty.call(row, field.fid))
+    );
+}
 
 export function buildPivotTable(
     dimsInRow: IViewField[],
@@ -21,7 +48,7 @@ export function buildPivotTable(
         type: 'ascending' | 'descending';
         mode: 'row' | 'column';
     }
-): { lt: INestNode; tt: INestNode; metric: (IRow | null)[][] } {
+): { lt: INestNode; tt: INestNode; metric: (IRow | null | undefined)[][] } {
     let lt: INestNode;
     let tt: INestNode;
     if (sort?.mode === 'row') {
@@ -31,13 +58,11 @@ export function buildPivotTable(
             collapsedKeyList,
             showTableSummary
         );
-        if (dimsInColumn.length > 0) {
-            const ks = dimsInColumn.map((x) => x.fid);
-            const vs = getFirsts(tt.children[0]).map((x) => x.value);
-            // move data of First column to first
-            const mentioned: IRow[] = [];
-            const rest: IRow[] = [];
-            allData.forEach((x) => (ks.every((k, i) => x[k] === vs[i]) ? mentioned.push(x) : rest.push(x)));
+        const firstColumnPath = getFirstVisibleValuePath(tt);
+        if (dimsInColumn.length > 0 && firstColumnPath.length > 0) {
+            const mentioned = getVisibleSlice([...allData, ...aggData], allData, dimsInRow, dimsInColumn, firstColumnPath);
+            const mentionedSet = new Set(mentioned);
+            const rest = allData.filter((row) => !mentionedSet.has(row));
             lt = buildNestTree(
                 dimsInRow.map((d) => d.fid),
                 mentioned,
@@ -62,13 +87,11 @@ export function buildPivotTable(
             collapsedKeyList,
             showTableSummary
         );
-        if (sort && dimsInRow.length > 0) {
-            const ks = dimsInRow.map((x) => x.fid);
-            const vs = getFirsts(lt.children[0]).map((x) => x.value);
-            // move data of First row to first
-            const mentioned: IRow[] = [];
-            const rest: IRow[] = [];
-            allData.forEach((x) => (ks.every((k, i) => x[k] === vs[i]) ? mentioned.push(x) : rest.push(x)));
+        const firstRowPath = getFirstVisibleValuePath(lt);
+        if (sort && dimsInRow.length > 0 && firstRowPath.length > 0) {
+            const mentioned = getVisibleSlice([...allData, ...aggData], allData, dimsInColumn, dimsInRow, firstRowPath);
+            const mentionedSet = new Set(mentioned);
+            const rest = allData.filter((row) => !mentionedSet.has(row));
             tt = buildNestTree(
                 dimsInColumn.map((d) => d.fid),
                 mentioned,

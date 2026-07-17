@@ -1,5 +1,5 @@
 import { IRow, IMutField, Specification, IFilterFiledSimple, IExpression, IViewQuery, IViewField } from './interfaces';
-import { INestNode } from './components/pivotTable/inteface';
+import { INestNode } from './components/pivotTable/interface';
 /* eslint import/no-webpack-loader-syntax:0 */
 // @ts-ignore
 // eslint-disable-next-line
@@ -23,6 +23,7 @@ function workerService<T, R>(worker: Worker, data: R): Promise<T> {
                     success: false,
                     message: e.data,
                 });
+                return;
             }
             resolve(e.data);
         };
@@ -162,10 +163,10 @@ export const buildPivotTableService = async (
         type: 'ascending' | 'descending';
         mode: 'row' | 'column';
     }
-): Promise<{ lt: INestNode; tt: INestNode; metric: (IRow | null)[][] }> => {
+): Promise<{ lt: INestNode; tt: INestNode; metric: (IRow | null | undefined)[][] }> => {
     const worker = new BuildMetricTableWorker();
     try {
-        const res: { lt: INestNode; tt: INestNode; metric: (IRow | null)[][] } = await workerService(worker, {
+        const res: { lt: INestNode; tt: INestNode; metric: (IRow | null | undefined)[][] } = await workerService(worker, {
             dimsInRow,
             dimsInColumn,
             allData,

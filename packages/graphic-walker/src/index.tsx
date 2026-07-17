@@ -13,3 +13,12 @@ export { getComputation } from './computation/clientComputation';
 export { addFilterForQuery, chartToWorkflow } from './utils/workflow';
 export * from './utils/colors';
 export * from './components/filterContext';
+export { PivotTable } from './components/pivotTable';
+export type {
+    ILocalPivotTableProps,
+    IRemotePivotTableProps,
+    PivotTableProps,
+    IPivotTablePath,
+    IPivotTablePathItem,
+    PivotTableValue,
+} from './components/pivotTable';

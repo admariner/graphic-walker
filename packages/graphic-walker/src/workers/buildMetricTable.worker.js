@@ -8,7 +8,7 @@ import { buildPivotTable } from "./buildPivotTable"
  * @param {import('../interfaces').IRow} aggData
  * @param {string[]} collapsedKeyList
  * @param {boolean} showTableSummary
- * @return {{lt: import('../components/pivotTable/inteface').INestNode, tt: import('../components/pivotTable/inteface').INestNode, metric: import('../interfaces').(IRow | null)[][]}}
+ * @return {{lt: import('../components/pivotTable/interface').INestNode, tt: import('../components/pivotTable/interface').INestNode, metric: (import('../interfaces').IRow | null | undefined)[][]}}
  */
 
 /**
@@ -20,7 +20,7 @@ const main = e => {
         const ans = buildPivotTable(dimsInRow, dimsInColumn, allData, aggData, collapsedKeyList, showTableSummary, sort);
         self.postMessage(ans);
     } catch (error) {
-        self.postMessage({ error: error.message });
+        self.postMessage(error instanceof Error ? error.message : String(error));
     }
 };
 

@@ -46,7 +46,7 @@ import { COUNT_FIELD_ID, DATE_TIME_DRILL_LEVELS, DATE_TIME_FEATURE_LEVELS, PAINT
 
 import { toWorkflow } from '../utils/workflow';
 import { KVTuple, uniqueId } from '../models/utils';
-import { INestNode } from '../components/pivotTable/inteface';
+import { INestNode } from '../components/pivotTable/interface';
 import { getSort, getSortedEncoding } from '../utils';
 import { getSQLItemAnalyticType, parseSQLExpr } from '../lib/sql';
 import { IPaintMapAdapter } from '../lib/paint';
@@ -738,7 +738,18 @@ export class VizSpecStore {
         const updatedMap = new Map(this.tableCollapsedHeaderMap);
         // if some child nodes of the incoming node are collapsed, remove them first
         updatedMap.forEach((existingPath, existingKey) => {
-            if (existingKey.startsWith(uniqueKey) && existingKey.length > uniqueKey.length) {
+            const isDescendant =
+                existingPath.length > node.path.length &&
+                node.path.every(
+                    (item, index) =>
+                        item.key === existingPath[index]?.key &&
+                        (item.value === existingPath[index]?.value ||
+                            (typeof item.value === 'number' &&
+                                typeof existingPath[index]?.value === 'number' &&
+                                Number.isNaN(item.value) &&
+                                Number.isNaN(existingPath[index]?.value)))
+                );
+            if (isDescendant) {
                 updatedMap.delete(existingKey);
             }
         });
