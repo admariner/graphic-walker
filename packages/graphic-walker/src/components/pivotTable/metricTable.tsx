@@ -1,18 +1,20 @@
 import React from 'react';
 import { useMemo } from 'react';
-import { IField, IRow, IVisualConfig } from '../../interfaces';
+import { IField, IRow } from '../../interfaces';
 import { getMeaAggKey } from '../../utils';
 import { format } from 'd3-format';
 
-interface MetricTableProps {
-    matrix: any[][];
+export interface MetricTableProps {
+    matrix: (IRow | null | undefined)[][];
+    rowHeaders: React.ReactNode[][];
     meaInRows: IField[];
     meaInColumns: IField[];
+    defaultAggregated: boolean;
     numberFormat: string;
 }
 
-function getCellData(cell: IRow, measure: IField, formatter: (value: unknown) => string) {
-    const meaKey = getMeaAggKey(measure.fid, measure.aggName);
+function getCellData(cell: IRow, measure: IField, defaultAggregated: boolean, formatter: (value: unknown) => string) {
+    const meaKey = defaultAggregated ? getMeaAggKey(measure.fid, measure.aggName) : measure.fid;
     if (cell[meaKey] === undefined) {
         return '--';
     }
@@ -22,10 +24,15 @@ function getCellData(cell: IRow, measure: IField, formatter: (value: unknown) =>
 
 const MetricTable: React.FC<MetricTableProps> = React.memo(
     (props) => {
-        const { matrix, meaInRows, meaInColumns, numberFormat } = props;
+        const { matrix, rowHeaders, meaInRows, meaInColumns, defaultAggregated, numberFormat } = props;
 
         const numberFormatter = useMemo<(value: unknown) => string>(() => {
-            const numberFormatter = numberFormat ? format(numberFormat) : (v: number) => v.toLocaleString();
+            let numberFormatter: (value: number) => string;
+            try {
+                numberFormatter = numberFormat ? format(numberFormat) : (value: number) => value.toLocaleString();
+            } catch {
+                numberFormatter = (value: number) => value.toLocaleString();
+            }
             return (value: unknown) => {
                 if (typeof value !== 'number') {
                     return `${value}`;
@@ -41,21 +48,23 @@ const MetricTable: React.FC<MetricTableProps> = React.memo(
                         return meaInRows.map((rowMea, rmIndex) => {
                             return (
                                 <tr className="divide-x divide-border" key={`${rIndex}-${rowMea.fid}-${rowMea.aggName}`}>
+                                    {rowHeaders[rIndex * meaInRows.length + rmIndex]}
                                     {row.flatMap((cell, cIndex) => {
-                                        cell = cell ?? {};
+                                        const record = cell ?? {};
                                         if (meaInColumns.length !== 0) {
                                             return meaInColumns.map((colMea, cmIndex) => (
                                                 <td
                                                     className="whitespace-nowrap p-2 text-xs"
                                                     key={`${rIndex}-${cIndex}-${rowMea.fid}-${rowMea.aggName}-${colMea.fid}-${colMea.aggName}`}
                                                 >
-                                                    {getCellData(cell, rowMea, numberFormatter)} , {getCellData(cell, colMea, numberFormatter)}
+                                                    {getCellData(record, rowMea, defaultAggregated, numberFormatter)} ,{' '}
+                                                    {getCellData(record, colMea, defaultAggregated, numberFormatter)}
                                                 </td>
                                             ));
                                         }
                                         return (
                                             <td className="whitespace-nowrap p-2 text-xs" key={`${rIndex}-${cIndex}-${rowMea.fid}-${rowMea.aggName}`}>
-                                                {getCellData(cell, rowMea, numberFormatter)}
+                                                {getCellData(record, rowMea, defaultAggregated, numberFormatter)}
                                             </td>
                                         );
                                     })}
@@ -65,12 +74,13 @@ const MetricTable: React.FC<MetricTableProps> = React.memo(
                     }
                     return (
                         <tr className="divide-x divide-border" key={rIndex}>
+                            {rowHeaders[rIndex]}
                             {row.flatMap((cell, cIndex) => {
-                                cell = cell ?? {};
+                                const record = cell ?? {};
                                 if (meaInRows.length === 0 && meaInColumns.length !== 0) {
                                     return meaInColumns.map((colMea, cmIndex) => (
                                         <td className="whitespace-nowrap p-2 text-xs" key={`${rIndex}-${cIndex}-${cmIndex}-${colMea.fid}-${colMea.aggName}`}>
-                                            {getCellData(cell, colMea, numberFormatter)}
+                                            {getCellData(record, colMea, defaultAggregated, numberFormatter)}
                                         </td>
                                     ));
                                 } else if (meaInRows.length === 0 && meaInColumns.length === 0) {
@@ -79,33 +89,14 @@ const MetricTable: React.FC<MetricTableProps> = React.memo(
                                             {`True`}
                                         </td>
                                     );
-                                } else {
-                                    return meaInRows.flatMap((rowMea, rmIndex) => (
-                                        <td className="whitespace-nowrap p-2 text-xs" key={`${rIndex}-${cIndex}-${rmIndex}-${rowMea.fid}-${rowMea.aggName}`}>
-                                            {meaInColumns.flatMap((colMea, cmIndex) => (
-                                                <td
-                                                    className="whitespace-nowrap p-2 text-xs"
-                                                    key={`${rIndex}-${cIndex}-${rmIndex}-${cmIndex}-${colMea.fid}-${colMea.aggName}`}
-                                                >
-                                                    {getCellData(cell, rowMea, numberFormatter)} , {getCellData(cell, colMea, numberFormatter)}
-                                                </td>
-                                            ))}
-                                        </td>
-                                    ));
                                 }
+                                return null;
                             })}
                         </tr>
                     );
                 })}
             </tbody>
         );
-    },
-    function areEqual(prevProps, nextProps) {
-        if (JSON.stringify(prevProps.matrix) === JSON.stringify(nextProps.matrix) && prevProps.numberFormat === nextProps.numberFormat) {
-            return true;
-        }
-
-        return false;
     }
 );
 

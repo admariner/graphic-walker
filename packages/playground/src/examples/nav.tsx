@@ -20,6 +20,7 @@ const raw: { group: string; name: string; comp: () => Promise<{ default: React.C
     // ── Core ─────────────────────────────────────
     { group: 'Core', comp: () => import('./pages/gw'), name: 'GraphicWalker' },
     { group: 'Core', comp: () => import('./pages/pureRenderer'), name: 'PureRenderer' },
+    { group: 'Core', comp: () => import('./pages/pivotTable'), name: 'PivotTable' },
     { group: 'Core', comp: () => import('./pages/renderer'), name: 'GraphicRenderer' },
     { group: 'Core', comp: () => import('./pages/defaultRenderer'), name: 'Default Renderer' },
 

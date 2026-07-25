@@ -1,8 +1,8 @@
-import React, { ReactNode, useEffect, useMemo } from 'react';
-import { INestNode } from './inteface';
+import React, { ReactNode, useMemo } from 'react';
+import { INestNode } from './interface';
 import { IField } from '../../interfaces';
 import { MinusCircleIcon, PlusCircleIcon } from '@heroicons/react/24/outline';
-import { formatDate } from '@/utils';
+import { formatDate, getMeaAggName } from '@/utils';
 import { parsedOffsetDate } from '@/lib/op/offset';
 
 function getChildCount(node: INestNode): number {
@@ -36,24 +36,33 @@ function renderTree(
         return;
     }
     const field = depth > 0 ? dimsInCol[depth - 1] : undefined;
-    const formatter = field?.semanticType === 'temporal' ? (x) => formatDate(parsedOffsetDate(displayOffset, field.offset)(x)) : (x) => `${x}`;
+    const formatter =
+        node.kind === 'value' && field?.semanticType === 'temporal'
+            ? (x) => formatDate(parsedOffsetDate(displayOffset, field.offset)(x))
+            : (x) => `${x}`;
     cellRows[depth].push(
-        <td
-            key={`${depth}-${node.fieldKey}-${node.value}-${cellRows[depth].length}`}
-            className="bg-secondary text-secondary-foreground align-top whitespace-nowrap p-2 text-xs m-1 border"
+        <th
+            key={`${depth}-${node.uniqueKey}-${cellRows[depth].length}`}
+            scope="col"
+            className="bg-secondary text-secondary-foreground align-top whitespace-nowrap p-2 text-xs m-1 border font-normal text-left"
             colSpan={isCollapsed ? Math.max(meaNumber, 1) : childrenSize * Math.max(meaNumber, 1)}
             rowSpan={isCollapsed ? node.height + 1 : 1}
         >
             <div className="flex">
                 <div>{formatter(node.value)}</div>
-                {node.height > 0 && node.key !== '__total' && enableCollapse && (
-                    <>
-                        {isCollapsed && <PlusCircleIcon className="w-3 ml-1 self-center cursor-pointer" onClick={() => onHeaderCollapse(node)} />}
-                        {!isCollapsed && <MinusCircleIcon className="w-3 ml-1 self-center cursor-pointer" onClick={() => onHeaderCollapse(node)} />}
-                    </>
+                {node.kind === 'value' && node.height > 0 && enableCollapse && (
+                    <button
+                        type="button"
+                        className="ml-1 self-center cursor-pointer"
+                        aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${formatter(node.value)}`}
+                        aria-expanded={!isCollapsed}
+                        onClick={() => onHeaderCollapse(node)}
+                    >
+                        {isCollapsed ? <PlusCircleIcon className="w-3" /> : <MinusCircleIcon className="w-3" />}
+                    </button>
                 )}
             </div>
-        </td>
+        </th>
     );
     if (isCollapsed) return;
     for (let i = 0; i < node.children.length; i++) {
@@ -66,13 +75,15 @@ export interface TreeProps {
     data: INestNode;
     dimsInCol: IField[];
     measInCol: IField[];
+    dimsInRow: IField[];
+    measInRow: IField[];
     onHeaderCollapse: (node: INestNode) => void;
-    onTopTreeHeaderRowNumChange: (num: number) => void;
     enableCollapse: boolean;
+    defaultAggregated: boolean;
     displayOffset?: number;
 }
 const TopTree: React.FC<TreeProps> = (props) => {
-    const { data, dimsInCol, measInCol, onHeaderCollapse, onTopTreeHeaderRowNumChange } = props;
+    const { data, dimsInCol, measInCol, dimsInRow, measInRow, onHeaderCollapse } = props;
     const nodeCells: ReactNode[][] = useMemo(() => {
         const cellRows: ReactNode[][] = new Array(dimsInCol.length + 1).fill(0).map(() => []);
         renderTree(data, dimsInCol, 0, cellRows, measInCol.length, onHeaderCollapse, props.enableCollapse, props.displayOffset);
@@ -94,27 +105,66 @@ const TopTree: React.FC<TreeProps> = (props) => {
         cellRows.push(
             new Array(totalChildrenSize).fill(0).flatMap((ele, idx) =>
                 measInCol.map((m) => (
-                    <td
+                    <th
                         key={`${cellRows.length}-${m.fid}-${m.aggName}-${idx}`}
-                        className="bg-secondary text-secondary-foreground whitespace-nowrap p-2 text-xs m-1 border"
+                        scope="col"
+                        className="bg-secondary text-secondary-foreground whitespace-nowrap p-2 text-xs m-1 border font-normal text-left"
                     >
-                        {m.aggName}({m.name})
-                    </td>
+                        {props.defaultAggregated ? getMeaAggName(m.name, m.aggName) : m.name}
+                    </th>
                 ))
             )
         );
         cellRows.shift();
-        return cellRows;
-    }, [data, dimsInCol, measInCol]);
-
-    useEffect(() => {
-        onTopTreeHeaderRowNumChange(nodeCells.filter((row) => row.length > 0).length);
-    }, [nodeCells]);
+        const visibleRows = cellRows.filter((row) => row.length > 0);
+        if (visibleRows.length === 0) {
+            visibleRows.push([
+                <th key="value" scope="col" className="bg-secondary text-secondary-foreground p-2 text-xs border font-normal text-left">
+                    Value
+                </th>,
+            ]);
+        }
+        const rowHeaderColumnCount = dimsInRow.length + (measInRow.length > 0 ? 1 : 0);
+        return visibleRows.map((row, rowIndex) => {
+            if (rowHeaderColumnCount === 0) {
+                return row;
+            }
+            if (rowIndex < visibleRows.length - 1) {
+                return [
+                    <th key={`corner-${rowIndex}`} aria-hidden="true" colSpan={rowHeaderColumnCount} className="bg-secondary p-2 text-xs border" />,
+                    ...row,
+                ];
+            }
+            return [
+                ...dimsInRow.map((field) => (
+                    <th
+                        key={`row-field-${field.fid}`}
+                        scope="col"
+                        className="bg-secondary text-secondary-foreground p-2 text-xs border whitespace-nowrap font-normal text-left"
+                    >
+                        {field.name}
+                    </th>
+                )),
+                ...(measInRow.length > 0
+                    ? [
+                          <th
+                              key="row-measure"
+                              scope="col"
+                              className="bg-secondary text-secondary-foreground p-2 text-xs border font-normal text-left"
+                          >
+                              Measure
+                          </th>,
+                      ]
+                    : []),
+                ...row,
+            ];
+        });
+    }, [data, dimsInCol, measInCol, dimsInRow, measInRow, onHeaderCollapse, props.defaultAggregated, props.enableCollapse, props.displayOffset]);
 
     return (
         <thead className="border bg-secondary">
             {nodeCells.map((row, rIndex) => (
-                <tr className={`${row?.length > 0 ? '' : 'hidden'} border`} key={rIndex}>
+                <tr className="border" key={rIndex}>
                     {row}
                 </tr>
             ))}

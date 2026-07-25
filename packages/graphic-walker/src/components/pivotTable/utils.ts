@@ -1,14 +1,32 @@
-import { IRow } from '../../interfaces';
-import { INestNode } from './inteface';
+import type { IRow } from '../../interfaces';
+import type { INestNode, IPivotTablePath, PivotTableValue } from './interface';
 
-const key_prefix = 'nk_';
+export function pivotTableValuesEqual(left: unknown, right: unknown): boolean {
+    return left === right || (typeof left === 'number' && typeof right === 'number' && Number.isNaN(left) && Number.isNaN(right));
+}
+
+function encodePivotTableValue(value: PivotTableValue): readonly [type: string, value?: string | number | boolean] {
+    if (value === null) return ['null'];
+    if (value === undefined) return ['undefined'];
+    if (typeof value === 'number') {
+        if (Number.isNaN(value)) return ['number', 'NaN'];
+        if (value === Infinity) return ['number', 'Infinity'];
+        if (value === -Infinity) return ['number', '-Infinity'];
+        return ['number', value === 0 ? 0 : value];
+    }
+    return [typeof value, value];
+}
+
+export function createPivotPathKey(path: readonly { key: string; value: PivotTableValue }[]): string {
+    return JSON.stringify(path.map(({ key, value }) => [key, encodePivotTableValue(value)]));
+}
 
 function insertNode(
     tree: INestNode,
     layerKeys: string[],
     nodeData: IRow,
     depth: number,
-    collapsedKeyList: string[],
+    collapsedKeySet: ReadonlySet<string>,
     sort?: {
         fid: string;
         type: 'ascending' | 'descending';
@@ -18,33 +36,32 @@ function insertNode(
         // tree.key = nodeData[layerKeys[depth]];
         return;
     }
-    const key = nodeData[layerKeys[depth]];
-    const uniqueKey = `${tree.uniqueKey}__${key}`;
+    const key = nodeData[layerKeys[depth]] as PivotTableValue;
+    const path: IPivotTablePath = [...tree.path, { key: layerKeys[depth], value: key }];
+    const uniqueKey = createPivotPathKey(path);
 
-    let child = tree.children.find((c) => c.key === key);
+    let child = tree.children.find((candidate) => pivotTableValuesEqual(candidate.key, key));
     if (!child) {
         child = {
+            kind: 'value',
             key,
             value: key,
             sort: depth === layerKeys.length - 1 && sort ? nodeData[sort.fid] ?? `_${key}` : key,
             uniqueKey: uniqueKey,
             fieldKey: layerKeys[depth],
             children: [],
-            path: [...tree.path, { key: layerKeys[depth], value: key }],
+            path,
             height: layerKeys.length - depth - 1,
-            isCollapsed: false,
+            isCollapsed: collapsedKeySet.has(uniqueKey),
         };
-        if (collapsedKeyList.includes(tree.uniqueKey)) {
-            tree.isCollapsed = true;
-        }
         const reverse = depth === layerKeys.length - 1 && sort?.type === 'descending';
         tree.children.splice(binarySearchIndex(tree.children, child.sort, reverse), 0, child);
     }
-    insertNode(child, layerKeys, nodeData, depth + 1, collapsedKeyList, sort);
+    insertNode(child, layerKeys, nodeData, depth + 1, collapsedKeySet, sort);
 }
 
 // Custom binary search function to find appropriate index for insertion.
-function binarySearchIndex(arr: INestNode[], keyVal: string | number, reverse = false): number {
+function binarySearchIndex(arr: INestNode[], keyVal: PivotTableValue, reverse = false): number {
     let start = 0,
         end = arr.length - 1;
 
@@ -63,19 +80,20 @@ function binarySearchIndex(arr: INestNode[], keyVal: string | number, reverse = 
     return start;
 }
 
-const ROOT_KEY = '__root';
-const TOTAL_KEY = '__total';
+const ROOT_KEY = '__pivot_root__';
+const SUMMARY_KEY = '__pivot_summary__';
 
 function insertSummaryNode(node: INestNode): void {
     if (node.children.length > 0) {
         node.children.unshift({
-            key: TOTAL_KEY,
+            kind: 'summary',
+            key: SUMMARY_KEY,
             value: `${node.value}(total)`,
             sort: '',
-            fieldKey: TOTAL_KEY,
-            uniqueKey: `${node.uniqueKey}${TOTAL_KEY}`,
+            fieldKey: '',
+            uniqueKey: JSON.stringify(['summary', node.uniqueKey]),
             children: [],
-            path: [],
+            path: [...node.path],
             height: node.children[0].height,
             isCollapsed: true,
         });
@@ -96,23 +114,25 @@ export function buildNestTree(
     },
     dataWithoutSort?: IRow[]
 ): INestNode {
+    const collapsedKeySet = new Set(collapsedKeyList);
     const tree: INestNode = {
+        kind: 'root',
         key: ROOT_KEY,
         value: 'root',
         fieldKey: 'root',
         sort: '',
-        uniqueKey: ROOT_KEY,
+        uniqueKey: createPivotPathKey([]),
         children: [],
         path: [],
         height: layerKeys.length,
         isCollapsed: false,
     };
     for (let row of data) {
-        insertNode(tree, layerKeys, row, 0, collapsedKeyList, sort);
+        insertNode(tree, layerKeys, row, 0, collapsedKeySet, sort);
     }
     if (dataWithoutSort) {
         for (let row of dataWithoutSort) {
-            insertNode(tree, layerKeys, row, 0, collapsedKeyList, { fid: '', type: sort?.type ?? 'ascending' });
+            insertNode(tree, layerKeys, row, 0, collapsedKeySet, { fid: '', type: sort?.type ?? 'ascending' });
         }
     }
     if (showSummary) {
@@ -146,7 +166,7 @@ class NodeIterator {
             if (counter > 100) break;
             let node = this.nodeStack[this.nodeStack.length - 1];
             let parent = this.nodeStack[this.nodeStack.length - 2];
-            let nodeIndex = parent.children.findIndex((n) => n.key === node!.key);
+            let nodeIndex = parent.children.findIndex((candidate) => candidate === node);
             if (nodeIndex === -1) break;
             if (cursorMoved) {
                 if (node.children.length > 0 && !node.isCollapsed) {
@@ -175,9 +195,9 @@ class NodeIterator {
         }
         return this.current;
     }
-    public predicates(): { key: string; value: string | number }[] {
+    public predicates(): IPivotTablePath {
         return this.nodeStack
-            .filter((node) => node.key !== ROOT_KEY)
+            .filter((node) => node.kind === 'value')
             .map((node) => ({
                 key: node.fieldKey,
                 value: node.value,
@@ -185,10 +205,28 @@ class NodeIterator {
     }
 }
 
-export function buildMetricTableFromNestTree(leftTree: INestNode, topTree: INestNode, data: IRow[]): (IRow | null)[][] {
+export function buildMetricTableFromNestTree(leftTree: INestNode, topTree: INestNode, data: IRow[]): (IRow | null | undefined)[][] {
     const mat: any[][] = [];
     const iteLeft = new NodeIterator(leftTree);
     const iteTop = new NodeIterator(topTree);
+    const dimensionKeys = Array.from(
+        new Set(
+            [...leftTree.children, ...topTree.children].flatMap(function collectKeys(node: INestNode): string[] {
+                return [...(node.kind === 'value' ? [node.fieldKey] : []), ...node.children.flatMap(collectKeys)];
+            })
+        )
+    );
+    const indexedRows = new Map<string, IRow>();
+    for (const row of data) {
+        const predicates = dimensionKeys
+            .filter((key) => Object.prototype.hasOwnProperty.call(row, key))
+            .map((key) => ({ key, value: row[key] as PivotTableValue }));
+        const key = createPivotPathKey(predicates);
+        const existing = indexedRows.get(key);
+        if (!existing || Object.keys(row).length <= Object.keys(existing).length) {
+            indexedRows.set(key, row);
+        }
+    }
     iteLeft.first();
     while (iteLeft.current !== null) {
         const vec: any[] = [];
@@ -196,9 +234,11 @@ export function buildMetricTableFromNestTree(leftTree: INestNode, topTree: INest
         while (iteTop.current !== null) {
             const predicates = iteLeft
                 .predicates()
-                .concat(iteTop.predicates())
-                .filter((ele) => ele.key !== TOTAL_KEY);
-            const matchedRows = data.filter((r) => predicates.every((pre) => r[pre.key] === pre.value));
+                .concat(iteTop.predicates());
+            const indexedRow = indexedRows.get(createPivotPathKey(predicates));
+            const matchedRows = indexedRow
+                ? [indexedRow]
+                : data.filter((row) => predicates.every((predicate) => pivotTableValuesEqual(row[predicate.key], predicate.value)));
             if (matchedRows.length > 0) {
                 // If multiple rows are matched, then find the most matched one (the row with smallest number of keys)
                 vec.push(matchedRows.reduce((a, b) => (Object.keys(a).length < Object.keys(b).length ? a : b)));
